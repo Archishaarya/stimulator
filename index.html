@@ -1,0 +1,190 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Asteroid Impact Simulator</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Orbitron', sans-serif;
+      margin: 0;
+      background: radial-gradient(circle at top, #0a0f24, #000);
+      color: #f0f0f0;
+    }
+    h1, h2, h3 { text-align: center; color: #fff; }
+    .info-section, form, #results {
+      background: rgba(0,0,0,0.7);
+      padding: 20px;
+      border-radius: 15px;
+      margin: 20px auto;
+      max-width: 900px;
+    }
+    label { display:block; margin:10px 0 5px; font-weight:bold; }
+    input, button {
+      padding:10px;
+      margin:5px 0;
+      border:none;
+      border-radius:8px;
+      font-size:1rem;
+    }
+    input { width: 220px; }
+    button { cursor:pointer; transition:0.3s; color:#fff; }
+    button:hover { transform:scale(1.05); box-shadow:0 0 15px rgba(0,255,150,0.8); }
+    #sim-btn { background: #4CAF50; padding: 10px 20px; }
+    #mitigate-btn { background: #2196F3; padding: 10px 20px; }
+    #map { height:500px; width:90%; max-width:1000px; margin:0 auto; border:2px solid #333; border-radius:15px; }
+    .result-card {
+      padding:10px;
+      border-radius:10px;
+      margin-top:10px;
+      font-weight:bold;
+      text-align:center;
+    }
+    .danger { background: rgba(255,0,0,0.3); border:1px solid red; color:#fff; }
+    .medium { background: rgba(255,165,0,0.3); border:1px solid orange; color:#fff; }
+    .low { background: rgba(0,255,0,0.3); border:1px solid lime; color:#000; }
+    #fact-box {
+      background: rgba(0,255,255,0.2);
+      border:1px solid #0ff;
+      border-radius:10px;
+      padding:15px;
+      text-align:center;
+      margin-top:10px;
+      font-style:italic;
+      color:#fff;
+    }
+  </style>
+</head>
+<body>
+
+<div class="info-section">
+  <h2>What Happens When a Meteor Hits Earth?</h2>
+  <p>Meteors are more than just streaks of light in the night sky. When one makes it all the way to Earth, the results can be dramatic—or even catastrophic.</p>
+  <ul>
+    <li><strong>Size & Speed:</strong> Bigger and faster meteors hit harder.</li>
+    <li><strong>Angle of Entry:</strong> A steep dive punches deeper; shallow might explode mid-air.</li>
+    <li><strong>Material:</strong> Rocky meteors break easily; metals survive longer.</li>
+    <li><strong>Location:</strong> Ocean = tsunami. Land = fires, craters, shockwaves.</li>
+  </ul>
+</div>
+
+<h1>🌌 Impactor 2025 Simulator</h1>
+<p style="text-align:center;">Enter details below to simulate an asteroid impact and try mitigation!</p>
+
+<form id="sim-form">
+  <label for="size">Asteroid Size (m):</label>
+  <input type="number" id="size" value="50" required>
+
+  <label for="speed">Speed (km/s):</label>
+  <input type="number" id="speed" value="20" required>
+
+  <label for="angle">Angle of Entry (degrees):</label>
+  <input type="number" id="angle" value="45" required>
+
+  <label for="density">Atmospheric Density (kg/m³):</label>
+  <input type="number" id="density" value="1.225" required>
+
+  <label for="lat">Latitude:</label>
+  <input type="number" id="lat" value="40.7" required>
+
+  <label for="lon">Longitude:</label>
+  <input type="number" id="lon" value="-74" required>
+
+  <label for="sound">Sound Intensity (dB):</label>
+  <input type="number" id="sound" value="120" min="0" max="250" required>
+
+  <button type="button" id="sim-btn" onclick="simulateImpact()">Simulate Impact</button>
+  <button type="button" id="mitigate-btn" onclick="applyMitigation()" style="display:none;">Apply Mitigation</button>
+</form>
+
+<div id="map"></div>
+<div id="results"></div>
+<div id="fact-box">💡 Did You Know? The Chelyabinsk meteor exploded with 30x Hiroshima's energy—yet never hit the ground!</div>
+
+<script>
+  // Initialize Leaflet map
+  const map = L.map('map').setView([40.7, -74], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  let impactMarker, blastCircle;
+  let originalSpeed = 0;
+
+  function simulateImpact() {
+    const size = parseFloat(document.getElementById('size').value);
+    const speed = parseFloat(document.getElementById('speed').value);
+    const angle = parseFloat(document.getElementById('angle').value);
+    const density = parseFloat(document.getElementById('density').value);
+    const lat = parseFloat(document.getElementById('lat').value);
+    const lon = parseFloat(document.getElementById('lon').value);
+    const soundDb = parseFloat(document.getElementById('sound').value);
+    originalSpeed = speed;
+
+    if (impactMarker) map.removeLayer(impactMarker);
+    if (blastCircle) map.removeLayer(blastCircle);
+    document.getElementById('results').innerHTML = '';
+
+    // Energy estimate
+    const radius_m = size / 2;
+    const meteorDensity = 3000;
+    const mass = (4/3) * Math.PI * radius_m**3 * meteorDensity;
+    const velocity = speed * 1000;
+    const energy_joules = 0.5 * mass * velocity**2;
+    const energy_mt = energy_joules / 4.184e15;
+
+    // Estimate blast radius
+    const blastRadius = size * 1000;
+    let damageLevel = 'Low', levelClass = 'low';
+    if (blastRadius > 100000) { damageLevel = 'High'; levelClass = 'danger'; }
+    else if (blastRadius > 50000) { damageLevel = 'Medium'; levelClass = 'medium'; }
+
+    // Sound classification
+    let soundLevel = 'Mild';
+    let soundDamage = 'No structural damage.';
+    if (soundDb > 140) {
+      soundLevel = 'Severe';
+      soundDamage = 'Structural damage, broken windows, ear damage.';
+    } else if (soundDb > 120) {
+      soundLevel = 'Loud';
+      soundDamage = 'Possible hearing loss, minor damage.';
+    } else if (soundDb > 100) {
+      soundLevel = 'Moderate';
+      soundDamage = 'Loud thunder, startling, no real damage.';
+    }
+
+    // Map marker
+    impactMarker = L.marker([lat, lon]).addTo(map).bindPopup("💥 Meteor Impact").openPopup();
+    blastCircle = L.circle([lat, lon], {
+      radius: blastRadius,
+      color: 'red',
+      fillOpacity: 0.4
+    }).addTo(map);
+
+    map.setView([lat, lon], 6);
+
+    // Results
+    const resultsDiv = document.getElementById('results');
+    resultsDiv.innerHTML = `
+      <h3>Simulation Results</h3>
+      <div class="result-card ${levelClass}">Damage Level: ${damageLevel}</div>
+      <p><strong>Blast Radius:</strong> ${(blastRadius / 1000).toFixed(1)} km</p>
+      <p><strong>Impact Energy:</strong> ${energy_mt.toFixed(2)} megatons of TNT</p>
+      <p><strong>Sound Intensity:</strong> ${soundDb} dB</p>
+      <p><strong>Sound Effect:</strong> ${soundLevel} – ${soundDamage}</p>
+    `;
+    resultsDiv.style.display = 'block';
+    document.getElementById('mitigate-btn').style.display = 'inline-block';
+  }
+
+  function applyMitigation() {
+    document.getElementById('speed').value = originalSpeed * 0.5;
+    simulateImpact();
+  }
+</script>
+
+</body>
+</html>
